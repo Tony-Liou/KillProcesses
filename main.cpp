@@ -13,18 +13,22 @@ void Print64bitProcessAndID(DWORD processID) {
     // Get the process name.
     if (nullptr != hProcess) {
         HMODULE hMod;
+        auto moduleSize = sizeof(hMod);
         DWORD cbNeeded;
 
-        if (EnumProcessModulesEx(hProcess, &hMod, sizeof(hMod), &cbNeeded, LIST_MODULES_ALL)) {
+        if (EnumProcessModulesEx(hProcess, &hMod, moduleSize, &cbNeeded, LIST_MODULES_ALL)) {
             GetModuleBaseName(hProcess, hMod, szProcessName, sizeof(szProcessName) / sizeof(TCHAR));
         }
 
-        if (cbNeeded > sizeof(hMod)) {
-            //std::cout << "hModule is too small. Need :" << cbNeeded << ", but only have: " << sizeof(hMod) << std::endl;
-            HMODULE biggerModule[cbNeeded/sizeof(hMod)];
+        if (cbNeeded > moduleSize) {
+            //std::cout << "hModule is too small. Obtained: " << moduleSize << ", needed: " << cbNeeded << std::endl;
+
+            auto *biggerModule = new HMODULE[cbNeeded / moduleSize];
             if (EnumProcessModulesEx(hProcess, biggerModule, sizeof(biggerModule), &cbNeeded, LIST_MODULES_ALL)) {
                 GetModuleBaseName(hProcess, *biggerModule, szProcessName, sizeof(szProcessName) / sizeof(TCHAR));
             }
+
+            delete[] biggerModule;
         }
     }
 
