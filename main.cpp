@@ -1,19 +1,18 @@
 #include <iostream>
-#include <cstdio>
+#include <memory>
+#include <string>
+#include <tuple>
 #include <tchar.h>
 #include <windows.h>
 #include <psapi.h>
 
-void Print64bitProcessAndID(DWORD processID) {
+std::tuple<unsigned long, std::string> Get64bitProcessIDAndName(DWORD processID) {
     TCHAR szProcessName[MAX_PATH] = TEXT("<unknown>");
 
-    // Get a handle to the process.
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, FALSE, processID);
-
-    // Get the process name.
     if (nullptr != hProcess) {
         HMODULE hMod;
-        auto moduleSize = sizeof(hMod);
+        const auto moduleSize = sizeof(hMod);
         DWORD cbNeeded;
 
         if (EnumProcessModulesEx(hProcess, &hMod, moduleSize, &cbNeeded, LIST_MODULES_ALL)) {
@@ -21,40 +20,56 @@ void Print64bitProcessAndID(DWORD processID) {
         }
 
         if (cbNeeded > moduleSize) {
-            //std::cout << "hModule is too small. Obtained: " << moduleSize << ", needed: " << cbNeeded << std::endl;
-
-            auto *biggerModule = new HMODULE[cbNeeded / moduleSize];
-            if (EnumProcessModulesEx(hProcess, biggerModule, sizeof(biggerModule), &cbNeeded, LIST_MODULES_ALL)) {
-                GetModuleBaseName(hProcess, *biggerModule, szProcessName, sizeof(szProcessName) / sizeof(TCHAR));
+            std::unique_ptr<HMODULE[]> biggerModule(new HMODULE[cbNeeded / moduleSize]);
+            if (EnumProcessModulesEx(hProcess, biggerModule.get(), sizeof(biggerModule), &cbNeeded, LIST_MODULES_ALL)) {
+                if (!GetModuleBaseName(hProcess, *biggerModule.get(), szProcessName,
+                                       sizeof(szProcessName) / sizeof(TCHAR))) {
+                    std::cout << "Get process name failed.\n";
+                }
             }
-
-            delete[] biggerModule;
         }
     }
+    CloseHandle(hProcess);
 
-    // Print the process name and identifier.
-    _tprintf(TEXT("%s  (PID: %u)\n"), szProcessName, processID);
+    return {processID, szProcessName};
+}
 
-    // Release the handle to the process.
+void KillProcess(const DWORD processID) {
+    const auto hProcess = OpenProcess(PROCESS_TERMINATE, FALSE, processID);
+    TerminateProcess(hProcess, 1);
     CloseHandle(hProcess);
 }
 
-int main() {
-    // Get the list of process identifiers.
-    DWORD aProcesses[1024], cbNeeded, cProcesses;
+int main(int argc, char *argv[]) {
+    std::string targetName;
+    if (argc > 1) {
+        targetName = argv[1];
+    } else {
+        std::cout << "Enter the target name: ";
+        std::cin >> targetName;
+    }
+
+    std::cout << "Searching [" << targetName << "]\n";
+
+    DWORD aProcesses[1 << 12], cbNeeded, cProcesses;
 
     if (!EnumProcesses(aProcesses, sizeof(aProcesses), &cbNeeded)) {
         return 1;
     }
 
-
-    // Calculate how many process identifiers were returned.
     cProcesses = cbNeeded / sizeof(DWORD);
 
-    // Print the name and process identifier for each process.
-    for (unsigned int i = 0; i < cProcesses; i++) {
+    std::cout << "Total process count: " << cProcesses << '\n';
+
+    for (unsigned int i = 0; i < cProcesses; ++i) {
         if (aProcesses[i] != 0) {
-            Print64bitProcessAndID(aProcesses[i]);
+            const auto [pid, pName] = Get64bitProcessIDAndName(aProcesses[i]);
+            std::cout << pid << ", " << pName << '\n';
+            if (pName.contains(targetName)) {
+                std::cout << "* Found a process: " << pName << '\n';
+                KillProcess(pid);
+                std::cout << "Process terminated\n";
+            }
         }
     }
 
